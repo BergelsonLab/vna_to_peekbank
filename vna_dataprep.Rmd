@@ -1,0 +1,678 @@
+---
+title: "VNA Dataprep"
+author: "Charlotte Moore"
+date: "last knit `r format(Sys.time())`"
+output:
+  html_document: default
+  pdf_document: 
+    latex_engine: xelatex
+editor_options: 
+  chunk_output_type: console
+---
+
+# Data Prep for VNA Eyetracking data
+
+## VNA
+This is a study of vowel alterations in verbs. Data was collected from 2018 to early 2020. 
+Participants were collected in two age groups - 16-20mo, and 24-28mo. 
+Audio was presented at pre-programmed times in the trials so there is no message report for this study.
+
+We need the fixation report from dataview (eyetracker output).
+
+Running this file in its entirety will produce the BINNED file.
+
+Suggested directory structure/settings (assumed below): 
+
+* your study is an Rproject in your github folder with the subfolders:
++ data with subfolder called 'eyetracking'
++ data_prep [your file made from this template should live in here!]
++ data_analysis
++ paper
+* you have your knit directory set to 'project directory' 
+(click little triangle next to 'knit' above to change this)
+See https://github.com/BergelsonLab/yoursmy for an example
+
+## Loading Libraries ----------------------------------------------
+
+```{r load_libraries}
+#notes: if you don't have these installed, uncomment  the next 3 lines
+# install.packages(c("devtools","tidyverse","readxl","forcats", "skimr"),
+#                  repos = "http://cran.us.r-project.org")
+# devtools::install_github("BergelsonLab/blabr")
+
+library(devtools)
+library(tidyverse)
+library(readxl)
+library(forcats)
+library(blabr)
+library(skimr)
+
+
+options(tibble.width = Inf)
+options(dplyr.width = 100)
+
+```
+
+Change the following to TRUE if you want to generate the result output files for
+all the functions below (but not the chunk at the very bottom of this rmd)
+```{r outputfile_generation}
+
+generate_output_file = TRUE
+
+```
+
+## Loading data ----------------------------------------------
+
+Loading fixations report: 
+
+* do a find and replace all for 'study name' with...your study name.
+* uncomment the line below and put your file path and study name there!
+
+```{r load_data}
+
+v90_to_v96 <- fixations_report("data/eyetracking/VNA_raw_data/fix_rep_v90_v96.xls") %>% 
+  filter(RECORDING_SESSION_LABEL != "v90") %>%
+  select(-Session_Name_, -Trial_Index_, -Trial_Recycled_) %>% 
+  mutate(RT = as.numeric(RT),
+         SHOULD_WE_PLAY_ATTENTION_GETTER = as.numeric(SHOULD_WE_PLAY_ATTENTION_GETTER),
+         SHOULD_WE_RECALIBRATE = as.numeric(SHOULD_WE_RECALIBRATE),
+         block = as.numeric(block),
+         order = as.numeric(order)) %>%
+  filter(CURRENT_FIX_END >= 13600)
+
+vna <- fixations_report("data/eyetracking/VNA_raw_data/VNA_fixrep_v01_v90.xls") %>% 
+  mutate(RT = as.numeric(RT),
+         SHOULD_WE_PLAY_ATTENTION_GETTER = as.numeric(SHOULD_WE_PLAY_ATTENTION_GETTER),
+         SHOULD_WE_RECALIBRATE = as.numeric(SHOULD_WE_RECALIBRATE),
+         block = as.numeric(block),
+         order = as.numeric(order),
+         Trial_Index_ = as.numeric(Trial_Index_)) %>% 
+  filter(CURRENT_FIX_END >= 13600)
+  
+vna <- full_join(vna, v90_to_v96) 
+
+# vna %>% 
+#   select(RECORDING_SESSION_LABEL, trial, CURRENT_FIX_DURATION) %>% 
+#   top_n(CURRENT_FIX_DURATION, n = 10) %>% 
+#   arrange(-CURRENT_FIX_DURATION)
+# 
+# length(unique(vna$RECORDING_SESSION_LABEL))
+
+vna_mes_rep <- read_tsv("data/eyetracking/VNA_raw_data/mes_rep_all.xls")
+
+```
+
+## List of SubjectNumbers with no EDF files
+*v13
+*v16
+*v30
+*v39
+*v49
+*v54
+*v63
+*v65
+*v66
+*v75
+*v76
+*v88
+*v89
+*v93
+
+In the previous step, we also removed 13 seconds of unusable data, where kids saw each vid by themselves and then saw the central fixation thing. Doesn't do a perfect job but cuts most of the noise and makes the file a manageable size. This is especially important for later when we binify.
+
+Get an idea of what is in the data we just loaded
+
+Careful, these are quite big
+uncomment the next set of lines and look CAREFULLY at the output here. 
+
+* are there any NAs? why? 
+* is the range of values for EACH variable right? 
+
+look into it! 
+
+```{r preview_main, eval=FALSE}
+
+summary(vna)
+glimpse(vna)
+skim(vna)
+colnames(vna)
+
+```
+
+Convert fixations data into 20ms bins 
+
+Each dataset is a little different, below you'll want to flag which columns
+you want to keep, and what each of them is. Some of them may be the same as below,
+but some may not! 
+Uncomment and edit the block below as appropriate
+
+```{r binify}
+
+vna_bin <- binifyFixations(vna,
+                           keepCols=c("RECORDING_SESSION_LABEL", #subject number
+                                      "CURRENT_FIX_INTEREST_AREA_LABEL", #TARGET or DISTRACTOR
+                                      "CURRENT_FIX_X", # coordinate for the x dimension
+                                      "CURRENT_FIX_Y", # coordinate for the y dimension
+                                      "trial", #1-28
+                                      "TRIAL_START_TIME", # in ms
+                                      "audiotarget", #name of sound file, e.g. where_diaper.wav
+                                      "carrier", #can, do, look, where
+                                      "distractorvideo","targetvideo", # image file name e.g. apple.jpg
+                                      "distractorloc","targetloc", #location of target and distractor [320,512] or [960,512] for the test trials
+                                      "pair", # which two videos were onscreen
+                                      "practice", # y or n
+                                      "order", # 1 or 2
+                                      "targetside", # L or R
+                                      "trialtype", # MP or CP
+                                      "block", # 1 or 2
+                                      "CURRENT_FIX_END")) # when does this particular fixation end (0 is anchored at the beginning of the entire trial)
+
+sentence_onsets <- vna_mes_rep %>% 
+  filter(CURRENT_MSG_TEXT == "PLAY_SENTENCE") %>% 
+  mutate(TargetOnset = CURRENT_MSG_TIME+1028) %>% 
+  select(RECORDING_SESSION_LABEL, TRIAL_INDEX, audioag, order, trial, audiotarget, TargetOnset, CURRENT_MSG_TIME) %>% 
+  left_join(
+vna_mes_rep %>% filter(str_detect(CURRENT_MSG_TEXT, "DISPLAY_BOTH_VIDEOS")) %>% 
+  group_by(RECORDING_SESSION_LABEL, TRIAL_INDEX) %>% 
+  summarise(video_start = min(CURRENT_MSG_TIME), 
+            video_end = max(CURRENT_MSG_TIME)) %>% 
+  mutate(duration = video_end-video_start)
+) %>% 
+  mutate(max_window_length = video_end - TargetOnset,
+         pre_window_length = TargetOnset - video_start,
+         vid_audio_diff = TargetOnset - 1028 - video_start)
+
+hist(sentence_onsets$vid_audio_diff)
+
+sentence_onsets %>% 
+  filter(vid_audio_diff > 5) %>% 
+  distinct(RECORDING_SESSION_LABEL, trial, vid_audio_diff)
+# participants who were tested on the mac have a ~40ms difference between the audio and video. nothing to be done
+
+sentence_onsets %>% 
+  summarise(mean(max_window_length),
+            median(max_window_length),
+            min(max_window_length),
+            max(max_window_length),
+            sd(max_window_length),
+            mean(duration),
+            min(duration),
+            max(duration),
+            sd(duration))
+  
+sentence_onsets %>% 
+  summarise(mean(TargetOnset),
+            sd(TargetOnset))
+
+length(unique(sentence_onsets$RECORDING_SESSION_LABEL))
+
+anti_join(tibble(subj = vna$RECORDING_SESSION_LABEL), 
+          tibble(subj = sentence_onsets$RECORDING_SESSION_LABEL)) #v352 has no mesrep
+```
+
+
+Look at binified data
+
+```{r preview_binified}
+
+dim(vna_bin) # 623643     22
+
+```
+
+```{r renaming_variables}
+
+vna_test_renamed <- vna_bin %>%
+  droplevels() %>% #drop any empty levels 
+  left_join(sentence_onsets) %>%  # adding in the message when the sentence started playing
+  rename(SubjectNumber = RECORDING_SESSION_LABEL,  #just renaming variables here
+         IAlabel = CURRENT_FIX_INTEREST_AREA_LABEL,
+         TargetImage = targetvideo,
+         TrialType = trialtype,
+         Pair = pair,
+         Trial = trial,
+         TargetSide = targetside,
+         AudioTarget = audiotarget,
+         TargetLoc = targetloc,
+         DistractorLoc = distractorloc,
+         Carrier = carrier,
+         DistractorImage = distractorvideo,
+         looking_X = CURRENT_FIX_X,
+         looking_Y = CURRENT_FIX_Y)%>%
+  ungroup()%>%
+  mutate(Pair = factor(Pair),                    #turning relevant things into factors
+         TargetSide = factor(TargetSide),
+         AudioTarget = factor(AudioTarget),
+         Carrier = factor(Carrier),
+         DistractorImage = factor(DistractorImage),
+         TargetImage = factor(TargetImage),
+         TargetLoc = factor(TargetLoc),
+         DistractorLoc = factor(DistractorLoc),
+         IAlabel = factor(IAlabel),
+         target = as.factor(gsub(".mp4","", TargetImage)),# remove the .mp4 from the TargetImage
+         TrialType = factor(TrialType),
+         SubjectNumber = tolower(SubjectNumber), # getting rid of any misnamed participants with capital Vs
+         SubjectNumber = factor(SubjectNumber), # turning them back into factors
+         SubjectNumber = fct_recode(SubjectNumber, "v02" = "v2")) #renaming one incorrectly entered subject)
+
+```
+
+Next we're going to determine which side of the screen participants were looking at (vna_test_gaze_sides) and create a window of analysis (the full 5 seconds of the trial)
+
+```{r coding_gaze_side}
+
+vna_test_gaze_sides <-  vna_test_renamed %>% 
+  mutate(GazeSide = ifelse(looking_Y > 1024 | looking_Y < 0, "OUT", #filtering out looks that go off the screen
+                            ifelse(between(looking_X, 0, 640), "L", #L for left side of screen
+                                   ifelse(between(looking_X, 640, 1280), "R", "OUT"))), # R for right side, "Out" for offscreen
+         gaze = factor(ifelse(as.character(TargetSide) == as.character(GazeSide), "TARGET", 
+                              (ifelse(GazeSide == "OUT", NA_character_, "DISTRACTOR")))), # splitting screen down middle
+         propt = ifelse(gaze == "TARGET", 1, ifelse(gaze == "DISTRACTOR",0, NA_integer_)), # gaze to binary nums
+         VerbType = ifelse(target %in% c("clean", "jump", "kiss", "walk"), "reg", "irreg"), #indicating whether the target is reg
+         Pair = fct_recode(Pair, run_jump = "A", throw_walk = "C", drink_kiss = "D", read_clean = "B")) # making pair more informative
+
+vna_test_gaze_sides %>% filter(is.na(gaze))
+
+```
+
+
+```{r add_age_and_gender}
+age_gender_deid <- read_csv("data/demographics/vna_age_gender_deid.csv") %>% 
+  rename(SubjectNumber = name)
+
+vna_age_added <- vna_test_gaze_sides %>%
+  left_join(age_gender_deid) %>% 
+  mutate(SubjectNumber = factor(SubjectNumber)) 
+# it turns SubjectNumber back into a character, so here we switch it again. Leaving it in both places for ease of adapting this script.
+
+vna_age_added %>% filter(young_old == "young") %>% distinct(SubjectNumber) # 34
+vna_age_added %>% filter(young_old == "old") %>% distinct(SubjectNumber) # 43
+
+```
+
+## THIS PART FOR EVERY STUDY IS PAINFUL AND NECESSARY!!! LOOK AT ALL DATA VERY CAREFULLY!!!
+
+spend time summarizing & glimpsing & probing & grouping your eyetracking data tibble.
+
+* does everything have the levels it should? 
+* are there NAs that are unexpected? 
+* are there data in the wrong possible values? 
+* check run-time study notes on eyetracking computer for any anomalies! 
+
+## Fix Misnamed subjects, false starts, and known errors ----------------------
+Sometimes when running subjects experimenters accidentally name the files wrong,
+with extra digits, typos, etc. or computer barfs and needs restarted, etc.
+
+```{r check_subject_names, warning=FALSE}
+
+unique(vna_age_added$SubjectNumber)
+```
+
+Which subjects have clear errors in naming? 
+* v352 (the second run of v35, shouldn't be used anyway because they made it halfway through the first time)
+* already renamed v2 to v02 above in the renaming_variables chunk
+
+Any other weird anomalies you found? Errors in the data source? Notes you need to act on?
+**list those  here** and fix by adding code below!
+
+Youngers:
+*v11 missing edf after trial 11 (so weird)
+*v352 had a tech failure so saw half the study twice, and no message report
+
+Oldies:
+*v37 computer error at t11
+*v41 computer error, no data
+*v44 parent took a call during study?! so experiment ended at t17
+*v50 fussout, only 7 trials
+*v57 fussout at t11
+*v69 fussout, noncompliant mom was saying the prompts a ton
+*v77 fussout at t12
+*v87 fussout, no data
+
+```{r pre_data_exclusion}
+
+vna_test_preexclude_fixes <- vna_age_added %>% 
+  filter(SubjectNumber != "v352",
+         SubjectNumber != "v36",
+         SubjectNumber != "v37", 
+         SubjectNumber != "v41",
+         SubjectNumber != "v42",
+         SubjectNumber != "v44", 
+         SubjectNumber != "v50", 
+         SubjectNumber != "v57", 
+         SubjectNumber != "v69",  
+         SubjectNumber != "v77", 
+         SubjectNumber != "v87")
+
+vna_test_preexclude_fixes %>% filter(young_old == "young") %>% distinct(SubjectNumber) #33
+vna_test_preexclude_fixes %>% filter(young_old == "old") %>% distinct(SubjectNumber) #36
+
+```
+
+
+now we're actually making new columns for noun onset, & our windows of interest. The function automatically makes the most common 3 wins the lab uses.   
+
+```{r window_interest}
+#367-200,3500,5000
+
+# each word onset is time-locked @ 1028 ms, and there's 10200ms of silence, then the attn getter (3500ms) = 13700
+
+vna_test_preexclude <- get_windows(vna_test_preexclude_fixes,
+                                   bin_size = 20,
+                                   nb_1 = 18,
+                                   long_window_time = 3970) # 3970 is the longest possible window, since the videos are only 5 secs long
+
+vna_test_preexclude %>% filter(young_old == "young") %>% distinct(SubjectNumber) #33
+vna_test_preexclude %>% filter(young_old == "old") %>% distinct(SubjectNumber) #36
+
+#is the window the right size? yes
+vna_test_preexclude %>% 
+  filter(longwin=="Y") %>% summarise(max(Nonset), min(Nonset))
+```
+### logic of window length: 
+
+both videos start playing at the same time that the sentence starts. The audio files for the sentences have all been created such that the target verb's onset is 1028ms into the audio file, meaning that the target onset is 1028ms after the message that the audio has started playing. The end of the video is 5000ms after it starts, so 5000-1028 = 3970
+
+
+## DATA Exclusion Processing ---------------------
+## removing low data----------------
+
+time: 2000
+time_bin: 20
+time before reaction can be linked to cue: 367
+
+explaining the math in the FindLowData function, which tags trials with data from less than 1/3 of the window of analysis (assumes 20ms bins) 
+
+*  e.g.: shortwin (e.g. Swingley & Aslin 367-2000ms window) 
+(2000-367)/20 = 82 max bins, and 1/3 of that has to be there so 
+(1/3) * (2000-367) = 1540 has to be there, 
+(2000-367) - ((1/3) * (2000-367)) & 1089 can be missing 
+
+```{r data_exclusion}
+vna_test_taglowdata <-vna_test_preexclude %>%
+  FindLowData(gazeData = ., window_size = 3970, "longwin", nb_2 = 367) %>%
+  dplyr::rename('lowdata_long' = 'missing_TF')
+
+summary(vna_test_taglowdata) 
+vna_test_taglowdata %>% filter(young_old == "young") %>% distinct(SubjectNumber) #33
+vna_test_taglowdata %>% filter(young_old == "old") %>% distinct(SubjectNumber) #36
+
+saveRDS(vna_test_preexclude, "data/eyetracking/VNA_raw_data/vna_test_preexclude.Rds")
+```
+
+First we want to take a simple look at how many data rows there are for each Ss,
+how many data rows where they're looking at T or D, and a graph of this.
+This doesn't take into account the lowdata we just tagged just yet
+
+**Note:** if your columns names are different, you may need to adjust code below
+
+```{r find_data_to_exclude}
+
+ages <- vna_test_taglowdata %>% 
+  select(SubjectNumber, young_old) %>% 
+  distinct()
+
+# per kid, how many trials out of 32 fresh out of the eyetracker?
+vna_trials_per_subj <- vna_test_taglowdata %>% 
+  group_by(SubjectNumber) %>% 
+  summarise(completed_trials = n_distinct(Trial))
+
+# for each kid, how many trials did you have <1/3 of the window?
+vna_lowdata_trials_per_subj <- vna_test_taglowdata %>%  
+  filter(lowdata_long == T | is.na(lowdata_long)) %>% 
+  group_by(SubjectNumber) %>% 
+  summarise(lowdata_trials= n_distinct(Trial))
+
+nrow(vna_lowdata_trials_per_subj)
+vna_lowdata_trials_per_subj %>% 
+  summarise(total = sum(lowdata_trials, na.rm = T)) # 189 trials from 52 kids
+
+# which trials had low data?
+vna_lowdata_trials <- vna_test_taglowdata %>% 
+  filter(lowdata_long != F | is.na(lowdata_long)) %>% 
+  left_join(ages) %>% 
+  distinct(Trial, SubjectNumber, young_old) 
+
+# for each kid, how many trials were frozen?
+vna_frozen_trials <- vna_test_taglowdata %>% 
+  group_by(SubjectNumber, Trial) %>% 
+  filter(!is.na(gaze)) %>% 
+  count(gaze) %>% 
+  mutate(prop_gaze = n/sum(n)) %>% 
+  filter(prop_gaze == 1) %>% 
+    left_join(ages)
+nrow(vna_frozen_trials) #118 trials
+
+vna_n_frozens <- vna_frozen_trials %>% 
+  group_by(SubjectNumber) %>% 
+  count(name = "n_frozen")
+
+# What's the overlap between low data and frozen trials?
+frozen_lowdata_trials <- inner_join(vna_frozen_trials %>% 
+             select(SubjectNumber, Trial),
+           vna_lowdata_trials) %>% 
+  left_join(ages)
+nrow(frozen_lowdata_trials) #59 trials of overlap between frozen and lowdata
+
+vna_frozen_and_lowdata <- inner_join(vna_lowdata_trials, vna_frozen_trials) %>%
+  group_by(SubjectNumber) %>% 
+  summarise(frozen_and_lowdata = n_distinct(Trial))
+
+vna_frozen_not_lowdata <- anti_join(vna_frozen_trials, vna_lowdata_trials)%>% 
+  group_by(SubjectNumber) %>% 
+  summarise(frozen_not_lowdata = n_distinct(Trial))
+
+vna_lowdata_not_frozen <- anti_join(vna_lowdata_trials, vna_frozen_trials) %>% 
+  group_by(SubjectNumber) %>% 
+  summarise(lowdata_not_frozen = n_distinct(Trial))
+
+# How many total bad trials are there and which ones are they? (frozen + lowdata)
+vna_all_the_baddies <- full_join(vna_lowdata_trials, vna_frozen_trials) %>% 
+  left_join(ages) %>% 
+  mutate(Subj_Trial = paste(SubjectNumber, Trial, sep = "_")) 
+
+bad_trials_from_excludes <- vna_test_taglowdata %>% 
+  group_by(SubjectNumber, young_old, bad_trial) %>% 
+  summarize(n_trials = n_distinct(Trial)) %>% 
+  pivot_wider(values_from = "n_trials", names_from = "bad_trial") %>% 
+  filter(`FALSE` < 16) %>% 
+  group_by(young_old) %>% 
+  summarize(bad_trials_from_excludes = sum(`TRUE`, na.rm = T))
+
+vna_y_exclusion_values <- tibble(total_excluded = nrow(vna_all_the_baddies %>% filter(young_old == "young")),
+                               frozen = nrow(vna_frozen_trials %>% filter(young_old == "young")),
+                               lowdata = nrow(vna_lowdata_trials %>% filter(young_old == "young")),
+                               overlap = nrow(frozen_lowdata_trials %>% filter(young_old == "young"))) %>% 
+  mutate(math_check = frozen + lowdata - overlap,
+         young_old = "young") %>% 
+  left_join(bad_trials_from_excludes)
+
+vna_o_exclusion_values <- tibble(total_excluded = nrow(vna_all_the_baddies %>% filter(young_old == "old")),
+                               frozen = nrow(vna_frozen_trials %>% filter(young_old == "old")),
+                               lowdata = nrow(vna_lowdata_trials %>% filter(young_old == "old")),
+                               overlap = nrow(frozen_lowdata_trials %>% filter(young_old == "old"))) %>% 
+  mutate(math_check = frozen + lowdata - overlap,
+         young_old = "old") %>% 
+  left_join(bad_trials_from_excludes)
+
+write_csv(vna_y_exclusion_values, "data/eyetracking/vna_y_trial_level_exclusions.csv")
+write_csv(vna_o_exclusion_values, "data/eyetracking/vna_o_trial_level_exclusions.csv")
+
+#248 rows, which is 189 (lowdata) + 118 (frozen) - 59 (overlap)
+nrow(vna_all_the_baddies) #248
+nrow(vna_frozen_trials) #118
+nrow(vna_lowdata_trials) #189
+nrow(frozen_lowdata_trials) #59
+
+
+vna_test_taglowdata <- vna_test_taglowdata %>% 
+  mutate(Subj_Trial = paste(SubjectNumber, Trial, sep = "_"),
+         bad_trial = ifelse(Subj_Trial %in% vna_all_the_baddies$Subj_Trial, T, F))
+
+nrow(vna_test_taglowdata %>% 
+  filter(bad_trial == T) %>% 
+  distinct(SubjectNumber, Trial)) #sanity check that the right things got removed
+
+vna_baddies_per_sub <- vna_test_taglowdata %>% 
+  filter(Subj_Trial %in% vna_all_the_baddies$Subj_Trial) %>% 
+  group_by(SubjectNumber) %>% 
+  summarise(total_excluded = n_distinct(Trial))
+
+# for each kid, how many pairs did they completely see? CP-MP and pig-mace
+vna_missing_contrasts <- vna_test_taglowdata %>% 
+  filter(bad_trial == F) %>%
+  mutate(trial_verb = paste(TrialType, VerbType, sep = "_")) %>% 
+  group_by(SubjectNumber, Pair, trial_verb) %>% 
+  count(trial_verb) %>% 
+  group_by(SubjectNumber) %>% 
+  count(Pair) %>% 
+  filter(n<4) 
+
+# how many of reg and irreg did they do?
+vna_n_trials_by_reg <- vna_test_taglowdata %>% 
+  filter(bad_trial == F) %>%
+  group_by(SubjectNumber, VerbType) %>% 
+  summarise(n = n_distinct(Trial)) %>% 
+  pivot_wider(names_from = VerbType, values_from = n)
+
+# for each kid how many MP trials did they have? How many CP trials?
+vna_n_trials_by_cond <- vna_test_taglowdata %>% 
+  filter(bad_trial == F) %>%
+  group_by(SubjectNumber, TrialType) %>% 
+  summarise(n = n_distinct(Trial)) %>% 
+  pivot_wider(names_from = TrialType, values_from = n)
+
+# for each of the 4 unique conditions, how many did they do?
+vna_trials_by_cond_reg <- vna_test_taglowdata %>% 
+  filter(bad_trial == F) %>%
+  mutate(cond_reg = paste(TrialType, VerbType, sep = "_")) %>% 
+  group_by(SubjectNumber, cond_reg) %>% 
+  summarise(n = n_distinct(Trial)) %>% 
+  pivot_wider(names_from = cond_reg, values_from = n)
+
+# per target picture, how many trials did we get?
+vna_per_image <- vna_test_taglowdata %>% 
+  filter(bad_trial == F) %>%
+  group_by(SubjectNumber, target) %>% 
+  summarise(trial_per_image = n_distinct(Trial)) %>% 
+  arrange(trial_per_image) %>% 
+  pivot_wider(names_from = target, values_from = trial_per_image, values_fill = 0)
+
+vna_goodies <- vna_test_taglowdata %>% 
+  filter(bad_trial == F) %>% 
+  group_by(SubjectNumber) %>% 
+  summarise(good_trials = n_distinct(Trial))
+  
+# table --------------------------------------------------------------------------------------------------------------------------------
+vna_participant_summary <- tibble(vna_trials_per_subj) %>%
+  left_join(ages) %>% 
+  left_join(vna_goodies) %>% 
+  left_join(vna_baddies_per_sub) %>% 
+  left_join(vna_lowdata_trials_per_subj) %>% 
+  left_join(vna_n_frozens) %>% 
+  left_join(vna_frozen_not_lowdata) %>%
+  left_join(vna_lowdata_not_frozen) %>% 
+  left_join(vna_frozen_and_lowdata) %>% 
+  left_join(vna_trials_by_cond_reg) %>% 
+  left_join(vna_per_image) %>% 
+  mutate_if(is.integer, ~replace(., is.na(.), 0)) %>% 
+  arrange(good_trials)
+
+vna_n_trials_by_cond_pair <- vna_test_taglowdata %>% 
+  filter(bad_trial == F) %>%
+  group_by(SubjectNumber, TrialType, Pair) %>% 
+  summarise(n = n_distinct(Trial)) %>% 
+  pivot_wider(names_from = TrialType, values_from = n)
+
+lowdata_by_pair <- vna_n_trials_by_cond_pair %>% 
+  filter(is.na(CP)|is.na(MP)) %>% 
+  distinct(SubjectNumber)
+
+# how many rows do we have for each kid?
+data_rows <- vna_test_taglowdata %>%
+  group_by(SubjectNumber) %>%
+  tally() %>%
+  arrange(n)
+
+td_rows <- vna_test_taglowdata %>%
+  group_by(SubjectNumber) %>%
+  filter(gaze %in% c("DISTRACTOR", "TARGET")) %>%
+  tally() %>%
+  arrange(n) %>%
+  rename(td_n = n)
+
+coarse_data_quantity_SS <- td_rows %>%
+  left_join(data_rows) %>%
+  mutate(prop_td = td_n/n,
+         prop_n_overmax_data = n/(max(n)),
+         prop_td_overmax_td = td_n/(max(td_n)))
+
+```
+
+from this it will be clear if
+
+* you got essentially no data from a subject, **list those Ss here:** Seems like everyone gave us something?
+
+* Which Ss contributed not that much data overall. 
+**list those Ss here:**
+* v83
+* v11
+* v02
+* v91
+* v14
+* v46
+
+But you can't tell yet if they were perfect for the trials they did do!
+Now we look at this based on how many trials Ss had with looking in at least
+1/3 of the window of interest
+
+```{r subject_level_excludes}
+
+Ss_stopped_early <- vna_test_taglowdata %>%
+  group_by(SubjectNumber) %>%
+  summarise(max_trial_num = max(as.numeric(Trial))) %>%
+  filter(max_trial_num<16)
+
+vna_excluded_participants <- vna_goodies %>% 
+  filter(good_trials < 16) %>% 
+  left_join(ages)
+write_csv(vna_excluded_participants, "data/eyetracking/vna_excluded_participants.csv")
+
+```
+If more than half low_data, child excluded. The reason to get rid of the NAs is that if there was NO gaze in a bin, it's NA, e.g. looked totally off screen from 150ms to 3000ms after target onset would have NA for lowdata_short
+
+
+Which Ss are out based on <50% of trials
+with at least 1/3 of the window of data?
+* v11
+
+### Compare to Participant Tracking Notes
+
+**put a copy of your participant_tracking.xlsx spreadsheet in your data folder!** 
+
+(you may need to generate this xlsx from the shared googledoc) 
+
+### Inconsistencies: which children did the data-driven process flag, but the notes didn't, or vice versa? 
+**list them here, along with your decision and rationale** e.g. 
+
+* v11 has "awesome! Loved it" in the notes but we only have 9 trials for them, leading me to believe it was a screwup with how the results file was created ***removing*** 
+
+Doing this painful process here lets you establish and write the 'exclude' part of your methods BEFORE you've looked at your results
+
+```{r remove_lowdata_Ss}
+vna_test <- vna_test_taglowdata %>%
+  filter(!SubjectNumber %in% vna_excluded_participants$SubjectNumber & bad_trial == F) %>%
+  filter(Nonset > -1200 & Nonset < 4000) %>% 
+  droplevels()
+
+nrow(vna_test %>% filter(young_old == "young") %>% distinct(SubjectNumber)) #30
+nrow(vna_test %>% filter(young_old == "old") %>% distinct(SubjectNumber)) #33
+```
+
+
+# Uncomment below to Save the data!
+
+```{r save}
+summary(vna_test)
+saveRDS(vna_test, file = "data/eyetracking/vna_test.Rds")
+saveRDS(vna_test_taglowdata, file = "data/eyetracking/vna_test_taglowdata.Rds")
+```
