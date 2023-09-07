@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+.DS_Store
+data/vna/raw/fixation-reports_subjects-v01-v89.xls
+data/vna/raw/fixation-reports_subjects-v90-v96.xls
+data/vna/raw/message-reports_subjects-all.xls
